@@ -4,6 +4,7 @@
 /frameCompress
 /fileCompress
 /fileRandomAccess
+/gpk_loader
 /blockStreaming_doubleBuffer
 /blockStreaming_ringBuffer
 /streamingHC_ringBuffer

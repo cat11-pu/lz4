@@ -56,6 +56,7 @@ ALL = print_version \
 	  frameCompress \
 	  fileCompress \
 	  fileRandomAccess \
+	  gpk_loader \
       blockStreaming_doubleBuffer \
 	  blockStreaming_ringBuffer \
 	  streamingHC_ringBuffer \
@@ -98,6 +99,10 @@ test : all $(LZ4)
 	$(LZ4) -vt $(TESTFILE).lz4
 	@echo "\n=== file random access ==="
 	./fileRandomAccess$(EXT) $(TESTFILE)
+	@echo "\n=== game patch loader ==="
+	./gpk_loader$(EXT) check ../artifacts/samples/texture.gpk
+	./gpk_loader$(EXT) check ../artifacts/samples/mesh.gpk
+	./gpk_loader$(EXT) check ../artifacts/samples/audio.gpk
 	@echo "\n=== Q&D benchmark ==="
 	./bench_functions$(EXT) 10000
 

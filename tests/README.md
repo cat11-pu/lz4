@@ -5,6 +5,7 @@ This directory is organized as follows :
 - `unit/` : unit tests, each one autonomous (see `unit/unittest.h` to add tests)
 - `fuzz/` : randomized tests of the library (`fuzzer`, `frametest`, `frameMT`)
 - `cli/` : tests of the `lz4` command line (`test-lz4-*.sh`)
+- `gpk/` : malformed game-patch corpus for the hardened GPK1 example loader
 - `compat/` : ABI, versions, installation, freestanding and build environment checks
 - `bench/` : `fullbench` (speed of each lz4 function), `test-lz4-speed.py` (speed difference between commits)
 - `tools/` : `datagen` (synthetic data generator), `checkFrame` (frame properties checker)
@@ -20,6 +21,7 @@ Test programs are built in this directory, by `make <program>`, and run by `make
   `-s#` changes the seed of their data, `-r` selects a random one, reported at the end.
   `make test-unittest` uses a random seed.
 - `make test-lz4-essentials` : main tests of the `lz4` command line
+- `make test-gpk-loader` : GPK1 loader round-trip and malformed-archive rejection
 - `make test` : all tests (long)
 
 

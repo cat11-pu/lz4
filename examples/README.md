@@ -9,3 +9,4 @@ All examples are GPL-2.0-or-later licensed.
      - [Double Buffer](blockStreaming_doubleBuffer.md)
      - [Line by Line Text Compression](blockStreaming_lineByLine.md)
      - [Dictionary Random Access](dictionaryRandomAccess.md)
+     - [Hardened game-patch loader](gpk_loader.md)

@@ -142,6 +142,16 @@ $(eval $(call c_program,datagen,tools/datagen.o $(PRGDIR)/lorem.o tools/loremOut
 checkFrame:
 $(eval $(call c_program_shared_o,checkFrame,$(LIB_OBJS) $(LIBDIR)/lz4frame.o tools/checkFrame.o))
 
+GPK_LOADER := ../examples/gpk_loader$(EXT)
+
+$(GPK_LOADER): ../examples/gpk_loader.c ../examples/gpk_loader.h
+	$(MAKE) -C ../examples gpk_loader
+
+.PHONY: test-gpk-loader
+test-gpk-loader: $(GPK_LOADER)
+	@echo "\n ---- game patch loader ----"
+	$(PYTHON) ./gpk/test-gpk-loader.py $(GPK_LOADER)
+
 # POSIX threads, except on MinGW and Windows : Windows threads, as in lib/Makefile
 # (clang rejects an unused -pthread with -Werror)
 PTHREAD_LDFLAGS := $(if $(filter MINGW% Windows%,$(TARGET_OS)),,-pthread)
@@ -212,7 +222,7 @@ test_targets:
 .PHONY: check
 check: test-lz4-essentials
 
-test: test-lz4 test-lz4c test-frametest test-frameMT-quick test-unittest test-fullbench test-fuzzer test-amalgamation
+test: test-lz4 test-lz4c test-frametest test-frameMT-quick test-unittest test-gpk-loader test-fullbench test-fuzzer test-amalgamation
 
 test32: MCM_CFLAGS += -m32
 test32: test

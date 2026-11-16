@@ -41,6 +41,11 @@ test_exes = {
     'args': ['-v', '-T@0@s'.format(fuzzer_time)],
     'test': false,
   },
+  'gpk_loader': {
+    'sources': files(lz4_source_root / 'examples/gpk_loader.c'),
+    'include_directories': include_directories(lz4_source_root / 'examples'),
+    'test': false,
+  },
   'freestanding': {
     'sources': files(lz4_source_root / 'tests/compat/freestanding.c'),
     'c_args': ['-ffreestanding', '-fno-stack-protector', '-Wno-unused-parameter', '-Wno-declaration-after-statement', '-DLZ4_DEBUG=0'],
@@ -115,6 +120,17 @@ foreach e, attrs : test_exes
 endforeach
 
 fs = import('fs')
+
+gpk_loader_test = find_program(lz4_source_root / 'tests/gpk/test-gpk-loader.py')
+test(
+  'gpk-loader',
+  gpk_loader_test,
+  args: [targets['gpk_loader']],
+  depends: [targets['gpk_loader']],
+  workdir: fs.parent(fs.parent(gpk_loader_test.full_path())),
+  env: run_env,
+  timeout: 120
+)
 
 run_env.prepend('PATH', meson.current_build_dir())
 
