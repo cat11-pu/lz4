@@ -3,7 +3,8 @@ Programs and scripts for automated testing of LZ4
 
 This directory is organized as follows :
 - `unit/` : unit tests, each one autonomous (see `unit/unittest.h` to add tests)
-- `fuzz/` : randomized tests of the library (`fuzzer`, `frametest`, `frameMT`)
+- `fuzz/` : randomized tests of the library (`fuzzer`, `frametest`, `frameMT`), and
+  `gamepatch`, a deterministic property test of valid and malformed game patch frames
 - `cli/` : tests of the `lz4` command line (`test-lz4-*.sh`)
 - `compat/` : ABI, versions, installation, freestanding and build environment checks
 - `bench/` : `fullbench` (speed of each lz4 function), `test-lz4-speed.py` (speed difference between commits)
@@ -20,6 +21,7 @@ Test programs are built in this directory, by `make <program>`, and run by `make
   `-s#` changes the seed of their data, `-r` selects a random one, reported at the end.
   `make test-unittest` uses a random seed.
 - `make test-lz4-essentials` : main tests of the `lz4` command line
+- `make test-gamepatch` : 50 valid and 200 malformed resource-carrying LZ4 frames
 - `make test` : all tests (long)
 
 
@@ -43,6 +45,17 @@ with a `test-lz4-<name>` target in `Makefile` and an entry in `build/meson/meson
 Scripts run from this directory, and find `lz4` and `datagen` in `PATH`.
 Their temporary files start with a prefix unique to the script, itself starting with `tmp`,
 and are removed on success.
+
+
+#### `fuzz/gamepatch.c` - frames carrying texture, mesh and audio resources
+
+`gamepatch` builds 50 deterministic valid patches, decodes each one with `lz4frame`, and compares
+it byte-for-byte with a block-level reference decoder. It also verifies an XXH64 hash per resource.
+Then it builds 200 malformed patches, alternating truncated resource blocks, invalid frame headers,
+corrupted blocks (including payloads whose block checksum was recomputed to reach the block decoder)
+and oversized blocks. Every malformed frame must be rejected (or reported incomplete) without
+writing outside its output buffer or leaking an allocation. Failures report the resource, block
+index and byte offset (block and mutation).
 
 
 #### `compat/test-lz4-versions.py` - script for testing lz4 interoperability between versions

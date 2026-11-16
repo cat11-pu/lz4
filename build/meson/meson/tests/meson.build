@@ -41,6 +41,10 @@ test_exes = {
     'args': ['-v', '-T@0@s'.format(fuzzer_time)],
     'test': false,
   },
+  'gamepatch': {
+    'sources': files(lz4_source_root / 'tests/fuzz/gamepatch.c'),
+    'timeout': 120,
+  },
   'freestanding': {
     'sources': files(lz4_source_root / 'tests/compat/freestanding.c'),
     'c_args': ['-ffreestanding', '-fno-stack-protector', '-Wno-unused-parameter', '-Wno-declaration-after-statement', '-DLZ4_DEBUG=0'],

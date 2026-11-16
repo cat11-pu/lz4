@@ -66,7 +66,7 @@ NB_LOOPS     ?= -i1
 default: all
 
 .PHONY: all
-all: fullbench fuzzer frametest unittest datagen checkFrame
+all: fullbench fuzzer frametest gamepatch unittest datagen checkFrame
 
 .PHONY: all32
 all32: MCM_CFLAGS += -m32
@@ -142,6 +142,10 @@ $(eval $(call c_program,datagen,tools/datagen.o $(PRGDIR)/lorem.o tools/loremOut
 checkFrame:
 $(eval $(call c_program_shared_o,checkFrame,$(LIB_OBJS) $(LIBDIR)/lz4frame.o tools/checkFrame.o))
 
+# property tests of LZ4 frames carrying game resources
+gamepatch:
+$(eval $(call c_program_shared_o,gamepatch,$(LIBDIR)/lz4frame.o $(LIB_OBJS) fuzz/gamepatch.o))
+
 # POSIX threads, except on MinGW and Windows : Windows threads, as in lib/Makefile
 # (clang rejects an unused -pthread with -Werror)
 PTHREAD_LDFLAGS := $(if $(filter MINGW% Windows%,$(TARGET_OS)),,-pthread)
@@ -212,7 +216,7 @@ test_targets:
 .PHONY: check
 check: test-lz4-essentials
 
-test: test-lz4 test-lz4c test-frametest test-frameMT-quick test-unittest test-fullbench test-fuzzer test-amalgamation
+test: test-lz4 test-lz4c test-frametest test-frameMT-quick test-gamepatch test-unittest test-fullbench test-fuzzer test-amalgamation
 
 test32: MCM_CFLAGS += -m32
 test32: test
@@ -392,6 +396,9 @@ test-fuzzer32: test-fuzzer
 test-frametest: frametest
 	./frametest -v $(FUZZER_TIME)
 
+test-gamepatch: gamepatch
+	./gamepatch
+
 # same frames with and without multi-threading support
 .PHONY: test-frameMT test-frameMT-quick
 test-frameMT: frameMT frameMT-nomt
@@ -414,7 +421,7 @@ test-unittest: unittest unittest-mt
 
 VALGRIND = valgrind --leak-check=yes --error-exitcode=1
 test-mem: FPREFIX = tmp-tvm
-test-mem: lz4 datagen fuzzer frametest unittest fullbench
+test-mem: lz4 datagen fuzzer frametest gamepatch unittest fullbench
 	@echo "\n ---- valgrind tests : memory analyzer ----"
 	$(VALGRIND) $(DATAGEN) -g50M > $(VOID)
 	$(DATAGEN) -g16KB > $(FPREFIX)dg16K
@@ -439,6 +446,7 @@ test-mem: lz4 datagen fuzzer frametest unittest fullbench
 	$(RM) $(FPREFIX)*
 	$(VALGRIND) ./fuzzer -i64 -t1
 	$(VALGRIND) ./frametest -i256
+	$(VALGRIND) ./gamepatch
 	$(VALGRIND) ./unittest
 
 test-mem32: lz4c32 datagen
