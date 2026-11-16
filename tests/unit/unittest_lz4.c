@@ -58,6 +58,7 @@ int LZ4_resetStreamState(void* state, char* inputBuffer);
 **************************************/
 static void freeStream(void* stream) { LZ4_freeStream((LZ4_stream_t*)stream); }
 static void freeStreamHC(void* stream) { LZ4_freeStreamHC((LZ4_streamHC_t*)stream); }
+static void freeDictBlock(void* dictBlock) { LZ4_freeDictBlock((LZ4_dictBlock_t*)dictBlock); }
 
 /* initialized stream, released at the end of the test */
 static LZ4_stream_t* newStream(void)
@@ -65,6 +66,14 @@ static LZ4_stream_t* newStream(void)
     LZ4_stream_t* const stream = (LZ4_stream_t*)UT_defer(freeStream, LZ4_createStream());
     ASSERT(stream != NULL);
     return stream;
+}
+
+static LZ4_dictBlock_t* newDictBlock(const char* dictionary, int dictSize, int blockSize)
+{
+    LZ4_dictBlock_t* const dictBlock =
+        (LZ4_dictBlock_t*)UT_defer(freeDictBlock, LZ4_createDictBlock(dictionary, dictSize, blockSize));
+    ASSERT(dictBlock != NULL);
+    return dictBlock;
 }
 
 /* 64 KB block, beyond the table clearing threshold whatever LZ4_MEMORY_USAGE,
@@ -771,6 +780,185 @@ TEST(saveDict_partial)
         ASSERT_EQ(LZ4_saveDict(stream, saved, firstSize), 64 KB);
         ASSERT_MEMEQ(saved, tail, 64 KB);
     }
+}
+
+/* Fixed dictionary blocks are independent from each other :
+ * the same input gives the same bytes, whatever previous calls and buffer addresses. */
+TEST(dictBlock_deterministicOutput)
+{
+    enum { blockSize = 4 KB };
+    const char* const dict = (const char*)UT_fixedSample(64 KB);
+    char* const src1 = (char*)UT_malloc(blockSize);
+    char* const src2 = (char*)UT_malloc(blockSize);
+    char* const other = (char*)UT_noise(blockSize);
+    int const capacity = LZ4_COMPRESSBOUND(blockSize);
+    char* const ref = (char*)UT_malloc((size_t)capacity);
+    char* const dst1 = (char*)UT_malloc((size_t)capacity);
+    char* const dst2 = (char*)UT_malloc((size_t)capacity);
+    char* const decoded1 = (char*)UT_malloc(blockSize);
+    char* const decoded2 = (char*)UT_malloc(blockSize);
+    LZ4_stream_t* const stream = newStream();
+    LZ4_dictBlock_t* const dictBlock1 = newDictBlock(dict, 64 KB, blockSize);
+    LZ4_dictBlock_t* const dictBlock2 = newDictBlock(dict, 64 KB, blockSize);
+    int refSize, cSize1, cSize2, dSize1, dSize2;
+
+    memcpy(src1, dict + 60 KB, 300);
+    memcpy(src1 + 300, dict + 20 KB, 700);
+    memcpy(src1 + 1 KB, dict + 40 KB, 600);
+    memcpy(src2, src1, blockSize);
+
+    LZ4_loadDict(stream, dict, 64 KB);
+    refSize = LZ4_compress_fast_continue(stream, src1, ref, blockSize, capacity, 1);
+    ASSERT(refSize > 0);
+
+    cSize1 = LZ4_compressBlock_usingDict(dictBlock1, src1, dst1, blockSize, capacity);
+    ASSERT_EQ(cSize1, refSize);
+    ASSERT_MEMEQ(dst1, ref, (size_t)refSize);
+
+    /* A different block must not leave history behind. */
+    ASSERT(LZ4_compressBlock_usingDict(dictBlock1, other, dst2, blockSize, capacity) > 0);
+    cSize2 = LZ4_compressBlock_usingDict(dictBlock1, src1, dst2, blockSize, capacity);
+    ASSERT_MSG(cSize2 == cSize1 && !memcmp(dst2, dst1, (size_t)cSize1),
+               "compressed output depends on previous blocks");
+
+    /* Different contexts and source addresses give the same bytes. */
+    cSize2 = LZ4_compressBlock_usingDict(dictBlock2, src2, dst2, blockSize, capacity);
+    ASSERT_MSG(cSize2 == cSize1 && !memcmp(dst2, dst1, (size_t)cSize1),
+               "compressed output depends on the context or source address");
+
+    dSize1 = LZ4_decompressBlock_usingDict(dictBlock1, dst1, decoded1, cSize1, blockSize);
+    dSize2 = LZ4_decompressBlock_usingDict(dictBlock2, dst1, decoded2, cSize1, blockSize);
+    ASSERT_EQ(dSize1, blockSize);
+    ASSERT_EQ(dSize2, blockSize);
+    ASSERT_MEMEQ(decoded1, src1, blockSize);
+    ASSERT_MEMEQ(decoded2, src1, blockSize);
+    ASSERT(LZ4_decompress_safe(dst1, decoded2, cSize1, blockSize) < 0);   /* dictionary is required */
+}
+
+/* Invalid parameters, empty blocks, and the block size limit. */
+TEST(dictBlock_boundaries)
+{
+    enum { blockSize = 1 KB };
+    const char* const dict = (const char*)UT_fixedSample(64 KB);
+    const char* const src = (const char*)UT_fixedNoise(blockSize);
+    int const capacity = LZ4_COMPRESSBOUND(blockSize);
+    char* const dst = (char*)UT_malloc((size_t)capacity);
+    char* const decoded = (char*)UT_malloc(blockSize);
+    LZ4_dictBlock_t* const dictBlock = newDictBlock(dict, 64 KB, blockSize);
+    LZ4_dictBlock_t* const emptyDictBlock = newDictBlock(NULL, 0, blockSize);
+    LZ4_dictBlock_t* const oneByteBlock = newDictBlock(dict, 64 KB, 1);
+    char empty[1] = { 0 };
+    char oneSrc[1] = { 'A' };
+    char oneDst[LZ4_COMPRESSBOUND(1)];
+    int cSize;
+
+    ASSERT_EQ(LZ4_freeDictBlock(NULL), 0);
+    ASSERT(LZ4_createDictBlock(NULL, 1, blockSize) == NULL);
+    ASSERT(LZ4_createDictBlock(dict, -1, blockSize) == NULL);
+    ASSERT(LZ4_createDictBlock(dict, 0, 0) == NULL);
+    ASSERT(LZ4_createDictBlock(dict, 0, -1) == NULL);
+    ASSERT(LZ4_createDictBlock(dict, 0, LZ4_MAX_INPUT_SIZE + 1) == NULL);
+    ASSERT(LZ4_compressBlock_usingDict(NULL, src, dst, blockSize, capacity) == 0);
+    ASSERT(LZ4_compressBlock_usingDict(dictBlock, NULL, dst, 1, capacity) == 0);
+    ASSERT(LZ4_compressBlock_usingDict(dictBlock, src, NULL, blockSize, capacity) == 0);
+    ASSERT(LZ4_compressBlock_usingDict(dictBlock, src, dst, -1, capacity) == 0);
+    ASSERT(LZ4_compressBlock_usingDict(dictBlock, src, dst, blockSize + 1, capacity) == 0);
+    ASSERT(LZ4_decompressBlock_usingDict(NULL, dst, decoded, 1, blockSize) < 0);
+
+    ASSERT_EQ(LZ4_compressBlock_usingDict(dictBlock, NULL, empty, 0, 1), 1);
+    ASSERT_EQ(empty[0], 0);
+    ASSERT_EQ(LZ4_decompressBlock_usingDict(dictBlock, empty, decoded, 1, 0), 0);
+    ASSERT(LZ4_compressBlock_usingDict(oneByteBlock, oneSrc, oneDst, 1, (int)sizeof(oneDst)) > 0);
+    ASSERT_EQ(LZ4_compressBlock_usingDict(oneByteBlock, oneSrc, oneDst, 2, (int)sizeof(oneDst)), 0);
+
+    cSize = LZ4_compressBlock_usingDict(dictBlock, src, dst, blockSize, capacity);
+    ASSERT(cSize > 0);
+    ASSERT_EQ(LZ4_compressBlock_usingDict(dictBlock, src, dst, blockSize, cSize - 1), 0);
+    ASSERT_EQ(LZ4_compressBlock_usingDict(dictBlock, src, dst, blockSize, 0), 0);
+    ASSERT_EQ(LZ4_compressBlock_usingDict(dictBlock, src, dst, blockSize, cSize), cSize);
+    ASSERT_EQ(LZ4_decompressBlock_usingDict(dictBlock, dst, decoded, cSize, blockSize), blockSize);
+    ASSERT_MEMEQ(decoded, src, blockSize);
+    ASSERT_EQ(LZ4_decompressBlock_usingDict(dictBlock, dst, decoded, cSize, blockSize - 1), -2);
+
+    /* A zero-size dictionary is valid, and gives regular one-shot behavior. */
+    cSize = LZ4_compressBlock_usingDict(emptyDictBlock, src, dst, blockSize, capacity);
+    ASSERT(cSize > 0);
+    ASSERT_EQ(LZ4_decompressBlock_usingDict(emptyDictBlock, dst, decoded, cSize, blockSize), blockSize);
+    ASSERT_MEMEQ(decoded, src, blockSize);
+}
+
+/* Dictionary sizes around LZ4_loadDict() limits : 0, below HASH_UNIT, and above 64 KB. */
+TEST(dictBlock_dictionarySizes)
+{
+    static const int dictSizes[] = { 0, 1, 3, 4, 64 KB, 64 KB + 512 };
+    enum { blockSize = 4 KB };
+    const char* const dict = (const char*)UT_fixedSample(64 KB + 512);
+    char* const block = (char*)UT_malloc(blockSize);
+    int const capacity = LZ4_COMPRESSBOUND(blockSize);
+    char* const dst = (char*)UT_malloc((size_t)capacity);
+    char* const tailDst = (char*)UT_malloc((size_t)capacity);
+    char* const decoded = (char*)UT_malloc(blockSize);
+    size_t i;
+
+    for (i = 0; i < ARRAY_SIZE(dictSizes); i++) {
+        int const dictSize = dictSizes[i];
+        LZ4_dictBlock_t* const dictBlock = newDictBlock(dict, dictSize, blockSize);
+        int const usable = MIN(dictSize, (int)(64 KB));
+        int cSize;
+
+        UT_fillNoise(block, blockSize);
+        if (usable >= 256)
+            memcpy(block, dict + dictSize - 256, 256);
+        cSize = LZ4_compressBlock_usingDict(dictBlock, block, dst, blockSize, capacity);
+        ASSERT(cSize > 0);
+        ASSERT_EQ(LZ4_decompressBlock_usingDict(dictBlock, dst, decoded, cSize, blockSize), blockSize);
+        ASSERT_MEMEQ(decoded, block, blockSize);
+
+        if (dictSize > (int)(64 KB)) {
+            LZ4_dictBlock_t* const tailDictBlock =
+                newDictBlock(dict + dictSize - 64 KB, 64 KB, blockSize);
+            int const tailSize =
+                LZ4_compressBlock_usingDict(tailDictBlock, block, tailDst, blockSize, capacity);
+            ASSERT_EQ(cSize, tailSize);
+            ASSERT_MEMEQ(dst, tailDst, (size_t)cSize);
+        }
+    }
+}
+
+/* Re-use one context for 10 000 blocks : no per-block allocation, no growing state. */
+TEST(dictBlock_tenThousandBlocks)
+{
+    enum { blockSize = 512, nbBlocks = 10000 };
+    const char* const dict = (const char*)UT_fixedSample(64 KB);
+    char* const block = (char*)UT_malloc(blockSize);
+    int const capacity = LZ4_COMPRESSBOUND(blockSize);
+    char* const dst = (char*)UT_malloc((size_t)capacity);
+    char* const first = (char*)UT_malloc((size_t)capacity);
+    char* const decoded = (char*)UT_malloc(blockSize);
+    LZ4_dictBlock_t* const dictBlock = newDictBlock(dict, 64 KB, blockSize);
+    int firstSize = 0;
+    int n, i;
+
+    for (n = 0; n < nbBlocks; n++) {
+        int cSize, dSize;
+        for (i = 0; i < blockSize; i++) block[i] = (char)(n * 31 + i * 17);
+        memcpy(block, dict + (n * 97) % (64 KB - 256), 256);
+        cSize = LZ4_compressBlock_usingDict(dictBlock, block, dst, blockSize, capacity);
+        ASSERT_MSG(cSize > 0, "block %i : compression failed", n);
+        dSize = LZ4_decompressBlock_usingDict(dictBlock, dst, decoded, cSize, blockSize);
+        ASSERT_MSG(dSize == blockSize && !memcmp(decoded, block, blockSize),
+                   "block %i : round trip failed", n);
+        if (n == 0) {
+            firstSize = cSize;
+            memcpy(first, dst, (size_t)cSize);
+        }
+    }
+
+    /* The first block gives the same bytes after 10 000 other blocks. */
+    for (i = 0; i < blockSize; i++) block[i] = (char)(i * 17);
+    memcpy(block, dict, 256);
+    ASSERT_EQ(LZ4_compressBlock_usingDict(dictBlock, block, dst, blockSize, capacity), firstSize);
+    ASSERT_MEMEQ(dst, first, (size_t)firstSize);
 }
 
 /* chains of short matches must not hide the period (#1805) */

@@ -458,6 +458,59 @@ LZ4LIB_API int LZ4_compress_fast_continue (LZ4_stream_t* streamPtr, const char* 
  */
 LZ4LIB_API int LZ4_saveDict (LZ4_stream_t* streamPtr, char* safeBuffer, int maxDictSize);
 
+/*! LZ4_dictBlock_t :
+ *  Opaque context for compressing independent blocks with a fixed dictionary.
+ *  Create it with LZ4_createDictBlock(), release it with LZ4_freeDictBlock().
+ *  A context can be re-used for any number of blocks. It is not thread-safe :
+ *  use one context per thread.
+ */
+typedef struct LZ4_dictBlock_s LZ4_dictBlock_t;
+
+/*! LZ4_createDictBlock() :
+ *  Creates a reusable context which compresses one block at a time using
+ *  @dictionary as its only history. Previously compressed blocks are never
+ *  referenced, so every block remains independently decodable, and compressed
+ *  bytes depend only on the dictionary, the block content, and compressed parameters.
+ *
+ *  @blockSize is the maximum decompressed size accepted by
+ *  LZ4_compressBlock_usingDict(). It must be > 0 and <= LZ4_MAX_INPUT_SIZE.
+ *  As with LZ4_loadDict(), only the last 64 KB of @dictionary are used.
+ *  @dictionary must remain accessible and unmodified until the context is freed.
+ *  A NULL @dictionary is allowed only when @dictSize == 0.
+ *
+ * @return : the new context, or NULL if parameters are invalid or allocation fails.
+ */
+#if !defined(RC_INVOKED) /* https://docs.microsoft.com/en-us/windows/win32/menurc/predefined-macros */
+#if !defined(LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION)
+LZ4LIB_API LZ4_dictBlock_t* LZ4_createDictBlock(const char* dictionary, int dictSize, int blockSize);
+LZ4LIB_API int LZ4_freeDictBlock(LZ4_dictBlock_t* dictBlock);
+#endif /* !defined(LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION) */
+#endif
+
+/*! LZ4_compressBlock_usingDict() :
+ *  Compresses one independent block with the fixed dictionary of @dictBlock.
+ *  @srcSize must be <= the @blockSize provided to LZ4_createDictBlock().
+ *  Previous calls through @dictBlock do not affect the compressed bytes.
+ *  @dstCapacity may be smaller than LZ4_compressBound(@srcSize) : in which case
+ *  compression returns 0 if the result doesn't fit.
+ *
+ * @return : size of the compressed block, or 0 on error.
+ */
+LZ4LIB_API int LZ4_compressBlock_usingDict(LZ4_dictBlock_t* dictBlock,
+                                           const char* src, char* dst,
+                                           int srcSize, int dstCapacity);
+
+/*! LZ4_decompressBlock_usingDict() :
+ *  Decompresses one block produced by LZ4_compressBlock_usingDict() with the
+ *  same dictionary, as stored in @dictBlock.
+ *
+ * @return : number of bytes decompressed,
+ *           or a negative error code (see LZ4_decompress_safe()).
+ */
+LZ4LIB_API int LZ4_decompressBlock_usingDict(const LZ4_dictBlock_t* dictBlock,
+                                             const char* src, char* dst,
+                                             int compressedSize, int dstCapacity);
+
 
 /*-**********************************************
 *  Streaming Decompression Functions

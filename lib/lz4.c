@@ -1998,6 +1998,79 @@ int LZ4_saveDict (LZ4_stream_t* LZ4_dict, char* safeBuffer, int dictSize)
 }
 
 
+/*-*******************************
+ * Fixed dictionary block API
+ ********************************/
+struct LZ4_dictBlock_s {
+    LZ4_stream_t dictState;   /* pre-loaded dictionary, used as a pristine template */
+    LZ4_stream_t workState;   /* restored from dictState before every block */
+    const char* dictionary;
+    int dictSize;
+    int blockSize;
+};
+
+#if !defined(LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION)
+LZ4_dictBlock_t* LZ4_createDictBlock(const char* dictionary, int dictSize, int blockSize)
+{
+    LZ4_dictBlock_t* dictBlock;
+    int loaded;
+
+    if (dictSize < 0 || (dictionary == NULL && dictSize != 0)) return NULL;
+    if (blockSize <= 0 || blockSize > LZ4_MAX_INPUT_SIZE) return NULL;
+
+    dictBlock = (LZ4_dictBlock_t*)ALLOC(sizeof(*dictBlock));
+    if (dictBlock == NULL) return NULL;
+
+    if (dictSize == 0) {
+        if (LZ4_initStream(&dictBlock->dictState, sizeof(dictBlock->dictState)) == NULL) {
+            FREEMEM(dictBlock);
+            return NULL;
+        }
+        loaded = 0;
+    } else {
+        loaded = LZ4_loadDict(&dictBlock->dictState, dictionary, dictSize);
+    }
+
+    dictBlock->dictionary = loaded == 0 ? NULL : dictionary + dictSize - loaded;
+    dictBlock->dictSize = loaded;
+    dictBlock->blockSize = blockSize;
+    return dictBlock;
+}
+
+int LZ4_freeDictBlock(LZ4_dictBlock_t* dictBlock)
+{
+    if (dictBlock == NULL) return 0;
+    FREEMEM(dictBlock);
+    return 0;
+}
+#endif /* !defined(LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION) */
+
+int LZ4_compressBlock_usingDict(LZ4_dictBlock_t* dictBlock,
+                                const char* src, char* dst,
+                                int srcSize, int dstCapacity)
+{
+    if (dictBlock == NULL) return 0;
+    if (srcSize < 0 || srcSize > dictBlock->blockSize) return 0;
+    if (dstCapacity < 0) return 0;
+    if (src == NULL && srcSize != 0) return 0;
+    if (dst == NULL && dstCapacity != 0) return 0;
+
+    /* Restore the pristine dictionary state : no history from previous blocks. */
+    LZ4_memcpy(&dictBlock->workState, &dictBlock->dictState, sizeof(dictBlock->workState));
+    return LZ4_compress_fast_continue(&dictBlock->workState, src, dst,
+                                      srcSize, dstCapacity, 1);
+}
+
+int LZ4_decompressBlock_usingDict(const LZ4_dictBlock_t* dictBlock,
+                                  const char* src, char* dst,
+                                  int compressedSize, int dstCapacity)
+{
+    if (dictBlock == NULL) return -1;
+    return LZ4_decompress_safe_usingDict(src, dst, compressedSize, dstCapacity,
+                                         dictBlock->dictionary, dictBlock->dictSize);
+}
+
+
 
 /*-*******************************
  *  Decompression functions
